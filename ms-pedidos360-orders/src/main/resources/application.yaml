@@ -44,6 +44,20 @@ messaging:
         name: orders.notifications.queue
         retry-queue: orders.notifications.retry.queue
         dead-letter-queue: orders.notifications.dlq
+      cloud-bridge:
+        name: orders.cloud-bridge.queue
+        retry-queue: orders.cloud-bridge.retry.queue
+        dead-letter-queue: orders.cloud-bridge.dlq
     retry:
       max-attempts: ${MESSAGING_RETRY_MAX_ATTEMPTS:3}
       delay-ms: ${MESSAGING_RETRY_DELAY_MS:5000}
+
+  # Google Cloud Pub/Sub (ver PubSubProperties / PubSubConfig)
+  pubsub:
+    enabled: ${GCP_PUBSUB_ENABLED:false}
+    project-id: ${GCP_PROJECT_ID:pedidos360-local}
+    emulator-host: ${PUBSUB_EMULATOR_HOST:}
+    topic: pedidos360-order-status
+    subscription: pedidos360-order-status-audit
+    publish-timeout: 10s
+    create-resources: ${GCP_PUBSUB_CREATE_RESOURCES:true}

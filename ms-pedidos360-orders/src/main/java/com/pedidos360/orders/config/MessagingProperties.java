@@ -43,8 +43,10 @@ public record MessagingProperties(
 
     /**
      * @param notifications ruta del caso de uso "notificar al cliente"
+     * @param cloudBridge   ruta del caso de uso "reenviar el estado a GCP Pub/Sub"
      */
-    public record Queues(@Valid @NotNull QueueRoute notifications) {
+    public record Queues(@Valid @NotNull QueueRoute notifications,
+                         @Valid @NotNull QueueRoute cloudBridge) {
     }
 
     /**

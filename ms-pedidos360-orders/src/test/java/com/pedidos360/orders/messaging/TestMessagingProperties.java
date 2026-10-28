@@ -14,7 +14,8 @@ public final class TestMessagingProperties {
                 new MessagingProperties.RoutingKeys("order.created", "order.status.changed", "order.#"),
                 new MessagingProperties.Queues(
                         new MessagingProperties.QueueRoute("test.notifications", "test.notifications.retry",
-                                "test.notifications.dlq")),
+                                "test.notifications.dlq"),
+                        new MessagingProperties.QueueRoute("test.cloud", "test.cloud.retry", "test.cloud.dlq")),
                 new MessagingProperties.Retry(3, 1000));
     }
 }

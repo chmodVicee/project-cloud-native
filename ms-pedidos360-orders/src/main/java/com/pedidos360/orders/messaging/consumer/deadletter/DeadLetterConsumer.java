@@ -23,7 +23,8 @@ public class DeadLetterConsumer {
     private static final int MAX_BODY_LOG = 500;
 
     @RabbitListener(id = "orders-dead-letters",
-            queues = "${messaging.rabbitmq.queues.notifications.dead-letter-queue}")
+            queues = {"${messaging.rabbitmq.queues.notifications.dead-letter-queue}",
+                    "${messaging.rabbitmq.queues.cloud-bridge.dead-letter-queue}"})
     public void onDeadLetter(Message message, Channel channel) throws IOException {
         MessageProperties props = message.getMessageProperties();
         List<Map<String, ?>> xDeath = props.getXDeathHeader();

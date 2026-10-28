@@ -28,6 +28,8 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li><b>Eventos de estado</b>: exchange topic {@code exchanges.orders}; el productor
  *   publica con {@code routing-keys.order-created} y {@code routing-keys.order-status-changed}.</li>
  *   <li><b>Notificaciones</b>: {@code exchanges.orders} --(order.#)--> {@code queues.notifications.name}.</li>
+ *   <li><b>Puente a la nube</b>: {@code exchanges.orders} --(order.#)--> {@code queues.cloud-bridge.name}
+ *   → GCP Pub/Sub (ver {@link PubSubConfig}).</li>
  *   <li><b>Reintentos</b>: {@code exchanges.retry} --(nombre de la cola)--> cola de espera con TTL
  *   {@code retry.delay-ms}; al expirar vuelve a la cola principal por el exchange por defecto.</li>
  *   <li><b>Mensajes muertos</b>: la cola principal rechaza (NACK sin requeue) hacia el DLX
@@ -103,6 +105,45 @@ public class RabbitMQConfig {
                                                   MessagingProperties properties) {
         return BindingBuilder.bind(notificationsDeadLetterQueue).to(deadLetterExchange)
                 .with(properties.queues().notifications().deadLetterQueue());
+    }
+
+    // ---------- Caso de uso: reenvío de estados a GCP Pub/Sub ----------
+
+    @Bean
+    public Queue cloudBridgeQueue(MessagingProperties properties) {
+        return mainQueue(properties, properties.queues().cloudBridge());
+    }
+
+    @Bean
+    public Queue cloudBridgeRetryQueue(MessagingProperties properties) {
+        return retryQueue(properties, properties.queues().cloudBridge());
+    }
+
+    @Bean
+    public Queue cloudBridgeDeadLetterQueue(MessagingProperties properties) {
+        return QueueBuilder.durable(properties.queues().cloudBridge().deadLetterQueue()).build();
+    }
+
+    /** Todos los eventos de pedidos (order.#) se reenvían también a la nube. */
+    @Bean
+    public Binding cloudBridgeBinding(Queue cloudBridgeQueue, TopicExchange ordersExchange,
+                                      MessagingProperties properties) {
+        return BindingBuilder.bind(cloudBridgeQueue).to(ordersExchange)
+                .with(properties.routingKeys().allOrderEvents());
+    }
+
+    @Bean
+    public Binding cloudBridgeRetryBinding(Queue cloudBridgeRetryQueue, DirectExchange retryExchange,
+                                           MessagingProperties properties) {
+        return BindingBuilder.bind(cloudBridgeRetryQueue).to(retryExchange)
+                .with(properties.queues().cloudBridge().name());
+    }
+
+    @Bean
+    public Binding cloudBridgeDeadLetterBinding(Queue cloudBridgeDeadLetterQueue, DirectExchange deadLetterExchange,
+                                                MessagingProperties properties) {
+        return BindingBuilder.bind(cloudBridgeDeadLetterQueue).to(deadLetterExchange)
+                .with(properties.queues().cloudBridge().deadLetterQueue());
     }
 
     // ---------- Conversión y envío ----------

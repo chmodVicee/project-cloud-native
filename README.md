@@ -227,7 +227,9 @@ evento JSON en RabbitMQ **después de confirmar la transacción** en la base de 
 | Consumidor | Cola | Qué hace |
 |------------|------|----------|
 | `notification/OrderNotificationConsumer` | `orders.notifications.queue` (`order.#`) | Notifica al cliente el nuevo estado (registro `[NOTIFICACIÓN]` en el log) |
-| `deadletter/DeadLetterConsumer` | `orders.notifications.dlq` | Registra en el log cada mensaje no entregado (cola de origen, motivo y contenido) |
+| `cloud/OrderCloudBridgeConsumer` | `orders.cloud-bridge.queue` (`order.#`) | Reenvía el estado al topic de **GCP Pub/Sub** `pedidos360-order-status` |
+| `cloud/PubSubOrderStatusSubscriber` | suscripción Pub/Sub `pedidos360-order-status-audit` | Consume desde Pub/Sub y registra `[PUBSUB]` en el log (ACK/NACK de Pub/Sub) |
+| `deadletter/DeadLetterConsumer` | `orders.notifications.dlq`, `orders.cloud-bridge.dlq` | Registra en el log cada mensaje no entregado (cola de origen, motivo y contenido) |
 
 Manejo de errores (`messaging/support/MessageRetryHandler`):
 
@@ -235,11 +237,21 @@ Manejo de errores (`messaging/support/MessageRetryHandler`):
 |-----------|-----------|---------|
 | Procesado correctamente | `basicAck` | - |
 | JSON inválido, campos obligatorios faltantes o pedido inexistente (no recuperable) | `basicNack(requeue=false)` | DLX `pedidos360.orders.dlx` → DLQ |
-| Error transitorio (p. ej. base de datos caída) | copia a la cola de espera (TTL 5 s) + `basicAck` | vuelve a la cola principal |
+| Error transitorio (base de datos o Pub/Sub caídos) | copia a la cola de espera (TTL 5 s) + `basicAck` | vuelve a la cola principal |
 | Error transitorio tras 3 intentos | `basicNack(requeue=false)` | DLQ |
 
 Nunca se hace `NACK` con *requeue* para no generar bucles de reproceso. Intentos y espera
 se ajustan con `MESSAGING_RETRY_MAX_ATTEMPTS` y `MESSAGING_RETRY_DELAY_MS`.
+
+### Cola de mensajes en GCP (Pub/Sub)
+
+**RabbitMQ** reparte los eventos *dentro* del sistema (notificaciones, reintentos, DLQ);
+**Google Cloud Pub/Sub** es la salida hacia la nube: cada estado se publica en el topic
+`pedidos360-order-status` para que otros sistemas en GCP lo consuman. En local se usa el
+emulador oficial (`pubsub-emulator`, sin credenciales); `ms-pedidos360-orders` crea el
+topic y la suscripción al arrancar. Para usar un proyecto GCP real: `PUBSUB_EMULATOR_HOST`
+vacío, `GCP_PROJECT_ID` del proyecto y credenciales ADC fuera del repositorio. Con
+`GCP_PUBSUB_ENABLED=false` el puente solo registra el evento y confirma el mensaje.
 
 ---
 

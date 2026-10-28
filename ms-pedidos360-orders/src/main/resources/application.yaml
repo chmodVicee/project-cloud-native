@@ -9,6 +9,23 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:pedidos360}
+    password: ${RABBITMQ_PASSWORD}
+    # El broker confirma cada publicacion y devuelve los mensajes no enrutables
+    publisher-confirm-type: correlated
+    publisher-returns: true
 
 catalog:
   url: ${CATALOG_URL:http://localhost:8081}
+
+# Nombres centralizados de la mensajeria (ver MessagingProperties / RabbitMQConfig)
+messaging:
+  rabbitmq:
+    exchanges:
+      orders: pedidos360.orders.exchange
+    routing-keys:
+      order-created: order.created
+      order-status-changed: order.status.changed

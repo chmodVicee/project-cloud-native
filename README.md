@@ -205,6 +205,23 @@ se puede cambiar. Las pantallas de pedidos se refrescan cada 4 s para reflejar e
 > La simulación automática anterior (`OrderStatusSimulator`, cambio cada 6 s y
 > cancelación aleatoria, variables `ORDERS_SIMULATION_*`) fue eliminada.
 
+### Mensajería asíncrona (RabbitMQ)
+
+Cada vez que un pedido se crea o cambia de estado, `ms-pedidos360-orders` publica un
+evento JSON en RabbitMQ **después de confirmar la transacción** en la base de datos:
+
+| Exchange (topic)             | Routing key            | Cuándo |
+|------------------------------|------------------------|--------|
+| `pedidos360.orders.exchange` | `order.created`        | Se crea un pedido (estado `RECIBIDO`) |
+| `pedidos360.orders.exchange` | `order.status.changed` | Un ADMIN cambia el estado |
+
+* Los nombres están centralizados en `application.yaml` (`messaging.rabbitmq.*`) y se
+  leen con `MessagingProperties`; los beans están en `config/RabbitMQConfig`.
+* `OrderService` no conoce RabbitMQ: emite un `OrderStatusEvent` de Spring y el
+  productor `messaging/producer/OrderEventProducer` lo envía al broker.
+* El broker confirma cada publicación (*publisher confirms*) y devuelve los mensajes no
+  enrutables; ambos casos quedan en los logs.
+
 ---
 
 ## Reglas de autorización (BFF)

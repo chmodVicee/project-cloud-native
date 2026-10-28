@@ -1,6 +1,7 @@
 package com.pedidos360.orders.service;
 
 import com.pedidos360.orders.dto.CreateOrderRequest;
+import com.pedidos360.orders.event.OrderStatusEvent;
 import com.pedidos360.orders.exception.ResourceNotFoundException;
 import com.pedidos360.orders.model.Order;
 import com.pedidos360.orders.model.OrderItem;
@@ -8,6 +9,7 @@ import com.pedidos360.orders.model.OrderStatus;
 import com.pedidos360.orders.repository.OrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpClientErrorException;
@@ -25,6 +27,7 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final RestClient restClient;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Value("${catalog.url}")
     private String catalogUrl;
@@ -65,7 +68,9 @@ public class OrderService {
         }
 
         order.setTotal(total);
-        return orderRepository.save(order);
+        Order saved = orderRepository.save(order);
+        eventPublisher.publishEvent(OrderStatusEvent.of(saved, null));
+        return saved;
     }
 
     public List<Order> findByUserEmail(String userEmail) {
@@ -96,8 +101,13 @@ public class OrderService {
         if (order.getStatus() == OrderStatus.CANCELADO || order.getStatus() == OrderStatus.ENTREGADO) {
             throw new IllegalStateException("No se puede cambiar el estado desde " + order.getStatus());
         }
+        OrderStatus previousStatus = order.getStatus();
         order.setStatus(newStatus);
-        return orderRepository.save(order);
+        Order saved = orderRepository.save(order);
+        if (previousStatus != newStatus) {
+            eventPublisher.publishEvent(OrderStatusEvent.of(saved, previousStatus));
+        }
+        return saved;
     }
 
     private ProductSnapshot fetchProduct(Long productId) {

@@ -31,14 +31,16 @@ Microsoft Entra ID (Usuarios + Roles)
 | **ms-pedidos360-users**    | 8083         | `users_db`  | Usuarios, login OAuth2 con Microsoft Entra ID y emisión de JWT |
 | **ms-pedidos360-catalog**  | 8081         | `catalog_db`| CRUD de categorías y productos, control de stock |
 | **ms-pedidos360-orders**   | 8082         | `orders_db` | Órdenes, estados y descuento de stock contra el catálogo |
+| **RabbitMQ**               | 5672 / 15672 | -           | Broker de mensajería asíncrona (AMQP + consola web de administración) |
+| **Pub/Sub emulator**       | 8085         | -           | Emulador local de Google Cloud Pub/Sub (sin credenciales de GCP) |
 
-**Tecnologías:** Java 21 · Spring Boot · PostgreSQL · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
+**Tecnologías:** Java 21 · Spring Boot · PostgreSQL · RabbitMQ · Google Cloud Pub/Sub · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
 
 ---
 
 ## Ejecución con Docker (recomendada)
 
-Levanta PostgreSQL + los 5 servicios (SPA + 4 microservicios) en un solo comando:
+Levanta PostgreSQL, RabbitMQ, el emulador de Pub/Sub y los servicios de la aplicación (SPA + microservicios) en un solo comando:
 
 ```bash
 # 1) Copiar el archivo de variables y completar los valores:
@@ -54,6 +56,7 @@ Una vez arriba:
 * BFF (punto de entrada único de la API): `http://localhost:8080`
 * Login con Microsoft (OAuth2): `http://localhost:8080/oauth2/authorization/azure`
 * Catálogo (vía BFF): `http://localhost:8080/api/catalog/products`
+* Consola de RabbitMQ: `http://localhost:15672` (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`)
 * Los puertos 8081, 8082 y 8083 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
 
 > Las variables requeridas en `.env`: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `JWT_SECRET`. `SPA_BASE_URL` define hacia dónde redirige el backend tras el login OAuth2 (por defecto `http://localhost:4200`).
@@ -241,6 +244,11 @@ AZURE_ADMIN_DOMAIN=duocuc.cl          # dominio que recibe rol ADMIN al entrar p
 GOOGLE_CLIENT_ID=                    # opcional: login con Google
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=http://localhost:8080/login/oauth2/code/google
+RABBITMQ_USER=pedidos360              # usuario del broker local (docker-compose)
+RABBITMQ_PASSWORD=cambia_esta_clave
+GCP_PUBSUB_ENABLED=true               # false = no se reenvían estados a Pub/Sub
+GCP_PROJECT_ID=pedidos360-local       # proyecto (ficticio en el emulador)
+PUBSUB_EMULATOR_HOST=pubsub-emulator:8085   # vacío = Pub/Sub real con credenciales ADC
 ```
 
 > _En funcionamiento: **Login con Microsoft Entra ID (OAuth2 + PKCE)**, **emisión/validación de JWT con roles**, **arquitectura BFF + 3 microservicios con bases de datos independientes**, **despliegue controlado por AWS API Gateway sobre ECS Fargate**._

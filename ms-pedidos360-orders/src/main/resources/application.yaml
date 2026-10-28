@@ -9,12 +9,55 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:pedidos360}
+    password: ${RABBITMQ_PASSWORD}
+    # El broker confirma cada publicacion y devuelve los mensajes no enrutables
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        # ACK explicito en cada consumidor (basicAck / basicNack)
+        acknowledge-mode: manual
+        prefetch: 10
+        # Un mensaje rechazado nunca vuelve a la cola: va a la DLQ
+        default-requeue-rejected: false
 
 catalog:
   url: ${CATALOG_URL:http://localhost:8081}
 
-orders:
-  simulation:
-    enabled: ${ORDERS_SIMULATION_ENABLED:true}
-    interval-ms: ${ORDERS_SIMULATION_INTERVAL_MS:6000}
-    cancel-rate: ${ORDERS_SIMULATION_CANCEL_RATE:0.3}
+# Nombres centralizados de la mensajeria (ver MessagingProperties / RabbitMQConfig)
+messaging:
+  rabbitmq:
+    exchanges:
+      orders: pedidos360.orders.exchange
+      retry: pedidos360.orders.retry
+      dead-letter: pedidos360.orders.dlx
+    routing-keys:
+      order-created: order.created
+      order-status-changed: order.status.changed
+      all-order-events: "order.#"
+    queues:
+      notifications:
+        name: orders.notifications.queue
+        retry-queue: orders.notifications.retry.queue
+        dead-letter-queue: orders.notifications.dlq
+      cloud-bridge:
+        name: orders.cloud-bridge.queue
+        retry-queue: orders.cloud-bridge.retry.queue
+        dead-letter-queue: orders.cloud-bridge.dlq
+    retry:
+      max-attempts: ${MESSAGING_RETRY_MAX_ATTEMPTS:3}
+      delay-ms: ${MESSAGING_RETRY_DELAY_MS:5000}
+
+  # Google Cloud Pub/Sub (ver PubSubProperties / PubSubConfig)
+  pubsub:
+    enabled: ${GCP_PUBSUB_ENABLED:false}
+    project-id: ${GCP_PROJECT_ID:pedidos360-local}
+    emulator-host: ${PUBSUB_EMULATOR_HOST:}
+    topic: pedidos360-order-status
+    subscription: pedidos360-order-status-audit
+    publish-timeout: 10s
+    create-resources: ${GCP_PUBSUB_CREATE_RESOURCES:true}

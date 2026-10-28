@@ -44,6 +44,9 @@ public class ProxyForwardFilter extends OncePerRequestFilter {
     @Value("${services.orders-url}")
     private String ordersUrl;
 
+    @Value("${services.rabbit-admin-url}")
+    private String rabbitAdminUrl;
+
     @Value("${public.base-url}")
     private String publicBaseUrl;
 
@@ -203,6 +206,9 @@ public class ProxyForwardFilter extends OncePerRequestFilter {
         if (path.startsWith("/api/orders")) {
             boolean admin = method.equals("PUT") && path.matches("^/api/orders/\\d+/status$");
             return new Target(ordersUrl, true, admin);
+        }
+        if (path.startsWith("/api/rabbit")) {
+            return new Target(rabbitAdminUrl, true, true);
         }
         return null;
     }

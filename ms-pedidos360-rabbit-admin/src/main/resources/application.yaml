@@ -1,0 +1,18 @@
+server:
+  port: ${PORT:8084}
+
+spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:pedidos360}
+    password: ${RABBITMQ_PASSWORD}
+
+# Reglas del administrador (ver RabbitAdminProperties)
+rabbit-admin:
+  # Prefijos que la API no permite crear ni eliminar: los reservados de RabbitMQ (amq.)
+  # y los que declara el sistema Pedidos360 desde sus microservicios.
+  protected-prefixes:
+    - amq.
+    - pedidos360.
+    - orders.

@@ -13,9 +13,10 @@ Microsoft Entra ID (Usuarios + Roles)
    │  Valida JWT + autorización (ADMIN/USER) + CORS
    ├──► ms-pedidos360-users    (usuarios, auth OAuth2, registro/login JWT)
    ├──► ms-pedidos360-catalog  (categorías y productos)
-   └──► ms-pedidos360-orders   (órdenes, reglas de negocio, stock)
-               │
-               └──► ms-pedidos360-catalog (valida precio y descuenta stock)
+   ├──► ms-pedidos360-orders   (órdenes, reglas de negocio, stock)
+   │           ├──► ms-pedidos360-catalog (valida precio y descuenta stock)
+   │           └──► RabbitMQ ──► consumidores (notificación, DLQ) ──► GCP Pub/Sub
+   └──► ms-pedidos360-rabbit-admin (ADMIN: colas, exchanges y bindings de RabbitMQ)
 ```
 
 > En **AWS** el mismo conjunto completa se despliega con **API Gateway + ALB + ECS
@@ -31,14 +32,17 @@ Microsoft Entra ID (Usuarios + Roles)
 | **ms-pedidos360-users**    | 8083         | `users_db`  | Usuarios, login OAuth2 con Microsoft Entra ID y emisión de JWT |
 | **ms-pedidos360-catalog**  | 8081         | `catalog_db`| CRUD de categorías y productos, control de stock |
 | **ms-pedidos360-orders**   | 8082         | `orders_db` | Órdenes, estados y descuento de stock contra el catálogo |
+| **ms-pedidos360-rabbit-admin** | 8084     | -           | API REST para crear/eliminar colas, exchanges y bindings de RabbitMQ |
+| **RabbitMQ**               | 5672 / 15672 | -           | Broker de mensajería asíncrona (AMQP + consola web de administración) |
+| **Pub/Sub emulator**       | 8085         | -           | Emulador local de Google Cloud Pub/Sub (sin credenciales de GCP) |
 
-**Tecnologías:** Java 21 · Spring Boot · PostgreSQL · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
+**Tecnologías:** Java 21 · Spring Boot · PostgreSQL · RabbitMQ · Google Cloud Pub/Sub · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
 
 ---
 
 ## Ejecución con Docker (recomendada)
 
-Levanta PostgreSQL + los 5 servicios (SPA + 4 microservicios) en un solo comando:
+Levanta PostgreSQL, RabbitMQ, el emulador de Pub/Sub y los servicios de la aplicación (SPA + microservicios) en un solo comando:
 
 ```bash
 # 1) Copiar el archivo de variables y completar los valores:
@@ -54,7 +58,8 @@ Una vez arriba:
 * BFF (punto de entrada único de la API): `http://localhost:8080`
 * Login con Microsoft (OAuth2): `http://localhost:8080/oauth2/authorization/azure`
 * Catálogo (vía BFF): `http://localhost:8080/api/catalog/products`
-* Los puertos 8081, 8082 y 8083 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
+* Consola de RabbitMQ: `http://localhost:15672` (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`)
+* Los puertos 8081, 8082, 8083 y 8084 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
 
 > Las variables requeridas en `.env`: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `JWT_SECRET`. `SPA_BASE_URL` define hacia dónde redirige el backend tras el login OAuth2 (por defecto `http://localhost:4200`).
 
@@ -69,12 +74,13 @@ docker-compose down
 
 ## Ejecución local (sin Docker)
 
-Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
+Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`); `orders` y `rabbit-admin` necesitan además RabbitMQ (`docker-compose up -d rabbitmq pubsub-emulator`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
 
 ```bash
 cd ms-pedidos360-users && ./mvnw spring-boot:run      # puerto 8083
 cd ms-pedidos360-catalog && ./mvnw spring-boot:run    # puerto 8081
 cd ms-pedidos360-orders && ./mvnw spring-boot:run     # puerto 8082
+cd ms-pedidos360-rabbit-admin && ./mvnw spring-boot:run  # puerto 8084
 cd ms-pedidos360-bff && ./mvnw spring-boot:run        # puerto 8080
 cd FRONTEND && npm install && npm run dev             # puerto 4200
 ```
@@ -84,6 +90,9 @@ cd FRONTEND && npm install && npm run dev             # puerto 4200
 ---
 
 ## Despliegue en AWS (API Gateway + ECS Fargate)
+
+> **Nota:** por ahora el proyecto se ejecuta solo en local (docker-compose). Esta sección
+> se conserva como referencia y no incluye la mensajería asíncrona.
 
 En AWS, todo el backend corre en **ECS Fargate** (un task con 6 contenedores tras un
 ALB) y el **API Gateway HTTP** es el único punto público de entrada. La SPA se sirve
@@ -182,10 +191,91 @@ Gateway.
 | `/carrito` | autenticado | Cantidades, total y creación de orden |
 | `/mis-pedidos` | autenticado | Órdenes del usuario con sus items |
 | `/admin/productos` | ADMIN | CRUD de productos y categorías |
-| `/admin/ordenes` | ADMIN | Cambio de estado de cualquier orden |
+| `/admin/ordenes` | ADMIN | Cambio de estado de cualquier orden (único origen de los cambios de estado) |
 | `/admin/usuarios` | ADMIN | Listado de usuarios |
 
 **Flujo OAuth2:** el botón de Microsoft lleva a `/oauth2/authorization/azure` (y el de Google a `/oauth2/authorization/google`). El proveedor redirige a su `AZURE_REDIRECT_URI`/`GOOGLE_REDIRECT_URI`, y `ms-pedidos360-users` completa el login y redirige a `${SPA_BASE_URL}/auth/callback?token=...`, donde la SPA guarda el token y navega al catálogo.
+
+---
+
+### Estados de un pedido
+
+`RECIBIDO → CONFIRMADO → PREPARANDO → LISTO → ENTREGADO` (o `CANCELADO`). Un pedido
+nace en `RECIBIDO` y avanza **solo** cuando un ADMIN cambia su estado desde
+`/admin/ordenes` (`PUT /api/orders/{id}/status`). Desde `ENTREGADO` o `CANCELADO` ya no
+se puede cambiar. Las pantallas de pedidos se refrescan cada 4 s para reflejar el cambio.
+
+> La simulación automática anterior (`OrderStatusSimulator`, cambio cada 6 s y
+> cancelación aleatoria, variables `ORDERS_SIMULATION_*`) fue eliminada.
+
+### Mensajería asíncrona (RabbitMQ)
+
+> Documentación completa (arquitectura, configuración, uso en el código, cómo levantarlo
+> y cómo probarlo): **[README-rabbitmq.md](README-rabbitmq.md)**.
+
+Cada vez que un pedido se crea o cambia de estado, `ms-pedidos360-orders` publica un
+evento JSON en RabbitMQ **después de confirmar la transacción** en la base de datos:
+
+| Exchange (topic)             | Routing key            | Cuándo |
+|------------------------------|------------------------|--------|
+| `pedidos360.orders.exchange` | `order.created`        | Se crea un pedido (estado `RECIBIDO`) |
+| `pedidos360.orders.exchange` | `order.status.changed` | Un ADMIN cambia el estado |
+
+* Los nombres están centralizados en `application.yaml` (`messaging.rabbitmq.*`) y se
+  leen con `MessagingProperties`; los beans están en `config/RabbitMQConfig`.
+* `OrderService` no conoce RabbitMQ: emite un `OrderStatusEvent` de Spring y el
+  productor `messaging/producer/OrderEventProducer` lo envía al broker.
+* El broker confirma cada publicación (*publisher confirms*) y devuelve los mensajes no
+  enrutables; ambos casos quedan en los logs.
+
+**Consumidores** (`messaging/consumer/<dominio>`, todos con `@RabbitListener` y ACK manual):
+
+| Consumidor | Cola | Qué hace |
+|------------|------|----------|
+| `notification/OrderNotificationConsumer` | `orders.notifications.queue` (`order.#`) | Notifica al cliente el nuevo estado (registro `[NOTIFICACIÓN]` en el log) |
+| `cloud/OrderCloudBridgeConsumer` | `orders.cloud-bridge.queue` (`order.#`) | Reenvía el estado al topic de **GCP Pub/Sub** `pedidos360-order-status` |
+| `cloud/PubSubOrderStatusSubscriber` | suscripción Pub/Sub `pedidos360-order-status-audit` | Consume desde Pub/Sub y registra `[PUBSUB]` en el log (ACK/NACK de Pub/Sub) |
+| `deadletter/DeadLetterConsumer` | `orders.notifications.dlq`, `orders.cloud-bridge.dlq` | Registra en el log cada mensaje no entregado (cola de origen, motivo y contenido) |
+
+Manejo de errores (`messaging/support/MessageRetryHandler`):
+
+| Situación | Respuesta | Destino |
+|-----------|-----------|---------|
+| Procesado correctamente | `basicAck` | - |
+| JSON inválido, campos obligatorios faltantes o pedido inexistente (no recuperable) | `basicNack(requeue=false)` | DLX `pedidos360.orders.dlx` → DLQ |
+| Error transitorio (base de datos o Pub/Sub caídos) | copia a la cola de espera (TTL 5 s) + `basicAck` | vuelve a la cola principal |
+| Error transitorio tras 3 intentos | `basicNack(requeue=false)` | DLQ |
+
+Nunca se hace `NACK` con *requeue* para no generar bucles de reproceso. Intentos y espera
+se ajustan con `MESSAGING_RETRY_MAX_ATTEMPTS` y `MESSAGING_RETRY_DELAY_MS`.
+
+### Administrador de RabbitMQ (`ms-pedidos360-rabbit-admin`)
+
+API REST (vía BFF, solo **ADMIN**) para gestionar el broker. Toda la lógica está en
+`RabbitAdminService`; los controladores solo validan (DTO con Bean Validation) y delegan.
+
+| Método y ruta | Descripción | Respuestas |
+|---------------|-------------|------------|
+| `POST /api/rabbit/queues` | Crea una cola (`durable`, `autoDelete`, DLX, TTL, `maxLength`) | 201, 400, 404 (DLX inexistente), 409 |
+| `GET /api/rabbit/queues/{name}` | Mensajes y consumidores de una cola | 200, 404 |
+| `DELETE /api/rabbit/queues/{name}?ifUnused=&ifEmpty=` | Elimina una cola | 204, 404, 409 |
+| `POST /api/rabbit/exchanges` | Crea un exchange `DIRECT`, `TOPIC`, `FANOUT` o `HEADERS` | 201, 400, 409 |
+| `DELETE /api/rabbit/exchanges/{name}` | Elimina un exchange | 204, 404, 409 |
+| `POST /api/rabbit/bindings` | Une un exchange con una cola u otro exchange | 201, 400, 404 |
+| `DELETE /api/rabbit/bindings?exchange=&destination=&destinationType=&routingKey=` | Elimina un binding | 204, 400, 404 |
+
+Los nombres con prefijo protegido (`amq.`, `pedidos360.`, `orders.`, configurables en
+`rabbit-admin.protected-prefixes`) no se pueden crear ni eliminar desde la API → `409`.
+
+### Cola de mensajes en GCP (Pub/Sub)
+
+**RabbitMQ** reparte los eventos *dentro* del sistema (notificaciones, reintentos, DLQ);
+**Google Cloud Pub/Sub** es la salida hacia la nube: cada estado se publica en el topic
+`pedidos360-order-status` para que otros sistemas en GCP lo consuman. En local se usa el
+emulador oficial (`pubsub-emulator`, sin credenciales); `ms-pedidos360-orders` crea el
+topic y la suscripción al arrancar. Para usar un proyecto GCP real: `PUBSUB_EMULATOR_HOST`
+vacío, `GCP_PROJECT_ID` del proyecto y credenciales ADC fuera del repositorio. Con
+`GCP_PUBSUB_ENABLED=false` el puente solo registra el evento y confirma el mensaje.
 
 ---
 
@@ -194,7 +284,8 @@ Gateway.
 * **Público (sin JWT):** `/oauth2/**`, `/login/oauth2/**`, `/api/auth/**` (login/registro).
 * **Cualquier usuario autenticado:** lectura del catálogo, sus órdenes, su perfil.
 * **Solo ADMIN:** escritura en catálogo (`POST/PUT/PATCH/DELETE /api/catalog/**`), cambio
-  de estado de órdenes (`PUT /api/orders/{id}/status`) y listado de usuarios (`GET /api/users`).
+  de estado de órdenes (`PUT /api/orders/{id}/status`), listado de usuarios (`GET /api/users`)
+  y administración de RabbitMQ (`/api/rabbit/**`).
 
 Respuestas de rechazo: `401` sin token o con token inválido/expirado, `403` con token
 válido pero sin rol suficiente.
@@ -226,6 +317,11 @@ AZURE_ADMIN_DOMAIN=duocuc.cl          # dominio que recibe rol ADMIN al entrar p
 GOOGLE_CLIENT_ID=                    # opcional: login con Google
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=http://localhost:8080/login/oauth2/code/google
+RABBITMQ_USER=pedidos360              # usuario del broker local (docker-compose)
+RABBITMQ_PASSWORD=cambia_esta_clave
+GCP_PUBSUB_ENABLED=true               # false = no se reenvían estados a Pub/Sub
+GCP_PROJECT_ID=pedidos360-local       # proyecto (ficticio en el emulador)
+PUBSUB_EMULATOR_HOST=pubsub-emulator:8085   # vacío = Pub/Sub real con credenciales ADC
 ```
 
-> _En funcionamiento: **Login con Microsoft Entra ID (OAuth2 + PKCE)**, **emisión/validación de JWT con roles**, **arquitectura BFF + 3 microservicios con bases de datos independientes**, **despliegue controlado por AWS API Gateway sobre ECS Fargate**._
+> _En funcionamiento: **Mensajería asíncrona con RabbitMQ (exchanges, colas, DLQ, reintentos, ACK manual) y GCP Pub/Sub**, **microservicio administrador de RabbitMQ**, **Login con Microsoft Entra ID (OAuth2 + PKCE)**, **emisión/validación de JWT con roles**, **arquitectura BFF + 3 microservicios con bases de datos independientes**, **despliegue controlado por AWS API Gateway sobre ECS Fargate**._

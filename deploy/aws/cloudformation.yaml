@@ -365,12 +365,6 @@ Resources:
               Value: !Ref DbPassword
             - Name: CATALOG_URL
               Value: http://localhost:8081
-            - Name: ORDERS_SIMULATION_ENABLED
-              Value: "true"
-            - Name: ORDERS_SIMULATION_INTERVAL_MS
-              Value: "6000"
-            - Name: ORDERS_SIMULATION_CANCEL_RATE
-              Value: "0.3"
           PortMappings:
             - ContainerPort: 8082
           LogConfiguration:

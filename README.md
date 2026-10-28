@@ -13,9 +13,10 @@ Microsoft Entra ID (Usuarios + Roles)
    │  Valida JWT + autorización (ADMIN/USER) + CORS
    ├──► ms-pedidos360-users    (usuarios, auth OAuth2, registro/login JWT)
    ├──► ms-pedidos360-catalog  (categorías y productos)
-   └──► ms-pedidos360-orders   (órdenes, reglas de negocio, stock)
-               │
-               └──► ms-pedidos360-catalog (valida precio y descuenta stock)
+   ├──► ms-pedidos360-orders   (órdenes, reglas de negocio, stock)
+   │           ├──► ms-pedidos360-catalog (valida precio y descuenta stock)
+   │           └──► RabbitMQ ──► consumidores (notificación, DLQ) ──► GCP Pub/Sub
+   └──► ms-pedidos360-rabbit-admin (ADMIN: colas, exchanges y bindings de RabbitMQ)
 ```
 
 > En **AWS** el mismo conjunto completa se despliega con **API Gateway + ALB + ECS
@@ -31,6 +32,7 @@ Microsoft Entra ID (Usuarios + Roles)
 | **ms-pedidos360-users**    | 8083         | `users_db`  | Usuarios, login OAuth2 con Microsoft Entra ID y emisión de JWT |
 | **ms-pedidos360-catalog**  | 8081         | `catalog_db`| CRUD de categorías y productos, control de stock |
 | **ms-pedidos360-orders**   | 8082         | `orders_db` | Órdenes, estados y descuento de stock contra el catálogo |
+| **ms-pedidos360-rabbit-admin** | 8084     | -           | API REST para crear/eliminar colas, exchanges y bindings de RabbitMQ |
 | **RabbitMQ**               | 5672 / 15672 | -           | Broker de mensajería asíncrona (AMQP + consola web de administración) |
 | **Pub/Sub emulator**       | 8085         | -           | Emulador local de Google Cloud Pub/Sub (sin credenciales de GCP) |
 
@@ -57,7 +59,7 @@ Una vez arriba:
 * Login con Microsoft (OAuth2): `http://localhost:8080/oauth2/authorization/azure`
 * Catálogo (vía BFF): `http://localhost:8080/api/catalog/products`
 * Consola de RabbitMQ: `http://localhost:15672` (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`)
-* Los puertos 8081, 8082 y 8083 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
+* Los puertos 8081, 8082, 8083 y 8084 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
 
 > Las variables requeridas en `.env`: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `JWT_SECRET`. `SPA_BASE_URL` define hacia dónde redirige el backend tras el login OAuth2 (por defecto `http://localhost:4200`).
 
@@ -72,12 +74,13 @@ docker-compose down
 
 ## Ejecución local (sin Docker)
 
-Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
+Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`); `orders` y `rabbit-admin` necesitan además RabbitMQ (`docker-compose up -d rabbitmq pubsub-emulator`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
 
 ```bash
 cd ms-pedidos360-users && ./mvnw spring-boot:run      # puerto 8083
 cd ms-pedidos360-catalog && ./mvnw spring-boot:run    # puerto 8081
 cd ms-pedidos360-orders && ./mvnw spring-boot:run     # puerto 8082
+cd ms-pedidos360-rabbit-admin && ./mvnw spring-boot:run  # puerto 8084
 cd ms-pedidos360-bff && ./mvnw spring-boot:run        # puerto 8080
 cd FRONTEND && npm install && npm run dev             # puerto 4200
 ```
@@ -243,6 +246,24 @@ Manejo de errores (`messaging/support/MessageRetryHandler`):
 Nunca se hace `NACK` con *requeue* para no generar bucles de reproceso. Intentos y espera
 se ajustan con `MESSAGING_RETRY_MAX_ATTEMPTS` y `MESSAGING_RETRY_DELAY_MS`.
 
+### Administrador de RabbitMQ (`ms-pedidos360-rabbit-admin`)
+
+API REST (vía BFF, solo **ADMIN**) para gestionar el broker. Toda la lógica está en
+`RabbitAdminService`; los controladores solo validan (DTO con Bean Validation) y delegan.
+
+| Método y ruta | Descripción | Respuestas |
+|---------------|-------------|------------|
+| `POST /api/rabbit/queues` | Crea una cola (`durable`, `autoDelete`, DLX, TTL, `maxLength`) | 201, 400, 404 (DLX inexistente), 409 |
+| `GET /api/rabbit/queues/{name}` | Mensajes y consumidores de una cola | 200, 404 |
+| `DELETE /api/rabbit/queues/{name}?ifUnused=&ifEmpty=` | Elimina una cola | 204, 404, 409 |
+| `POST /api/rabbit/exchanges` | Crea un exchange `DIRECT`, `TOPIC`, `FANOUT` o `HEADERS` | 201, 400, 409 |
+| `DELETE /api/rabbit/exchanges/{name}` | Elimina un exchange | 204, 404, 409 |
+| `POST /api/rabbit/bindings` | Une un exchange con una cola u otro exchange | 201, 400, 404 |
+| `DELETE /api/rabbit/bindings?exchange=&destination=&destinationType=&routingKey=` | Elimina un binding | 204, 400, 404 |
+
+Los nombres con prefijo protegido (`amq.`, `pedidos360.`, `orders.`, configurables en
+`rabbit-admin.protected-prefixes`) no se pueden crear ni eliminar desde la API → `409`.
+
 ### Cola de mensajes en GCP (Pub/Sub)
 
 **RabbitMQ** reparte los eventos *dentro* del sistema (notificaciones, reintentos, DLQ);
@@ -260,7 +281,8 @@ vacío, `GCP_PROJECT_ID` del proyecto y credenciales ADC fuera del repositorio. 
 * **Público (sin JWT):** `/oauth2/**`, `/login/oauth2/**`, `/api/auth/**` (login/registro).
 * **Cualquier usuario autenticado:** lectura del catálogo, sus órdenes, su perfil.
 * **Solo ADMIN:** escritura en catálogo (`POST/PUT/PATCH/DELETE /api/catalog/**`), cambio
-  de estado de órdenes (`PUT /api/orders/{id}/status`) y listado de usuarios (`GET /api/users`).
+  de estado de órdenes (`PUT /api/orders/{id}/status`), listado de usuarios (`GET /api/users`)
+  y administración de RabbitMQ (`/api/rabbit/**`).
 
 Respuestas de rechazo: `401` sin token o con token inválido/expirado, `403` con token
 válido pero sin rol suficiente.

@@ -114,6 +114,22 @@ services:
     ports:
       - "8082:8082"
 
+  # Administrador de RabbitMQ: API REST para crear/eliminar colas, exchanges y bindings
+  ms-pedidos360-rabbit-admin:
+    build:
+      context: ./ms-pedidos360-rabbit-admin
+    container_name: ms-pedidos360-rabbit-admin
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-pedidos360}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-pedidos360}
+    ports:
+      - "8084:8084"
+
   ms-pedidos360-bff:
     build:
       context: ./ms-pedidos360-bff
@@ -125,10 +141,13 @@ services:
         condition: service_started
       ms-pedidos360-orders:
         condition: service_started
+      ms-pedidos360-rabbit-admin:
+        condition: service_started
     environment:
       USERS_URL: http://ms-pedidos360-users:8083
       CATALOG_URL: http://ms-pedidos360-catalog:8081
       ORDERS_URL: http://ms-pedidos360-orders:8082
+      RABBIT_ADMIN_URL: http://ms-pedidos360-rabbit-admin:8084
       BFF_PUBLIC_BASE: ${BFF_PUBLIC_BASE:-http://localhost:8080}
       JWT_SECRET: ${JWT_SECRET:-5f2a91c4e8b7d34a6190f2c8a7b5e4d921c3f0a8e6d7b5c4a3f2e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1}
     ports:

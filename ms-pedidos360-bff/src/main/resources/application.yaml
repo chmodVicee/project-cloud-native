@@ -5,6 +5,7 @@ services:
   users-url: ${USERS_URL:http://localhost:8083}
   catalog-url: ${CATALOG_URL:http://localhost:8081}
   orders-url: ${ORDERS_URL:http://localhost:8082}
+  rabbit-admin-url: ${RABBIT_ADMIN_URL:http://localhost:8084}
 
 public:
   base-url: ${BFF_PUBLIC_BASE:http://localhost:8080}

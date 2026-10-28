@@ -56,7 +56,10 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         String token = jwtService.generateToken(user);
 
         response.setStatus(HttpServletResponse.SC_FOUND);
-        response.sendRedirect(spaBaseUrl + "/auth/callback?token=" + token);
+        String baseUrl = spaBaseUrl.endsWith("/")
+                ? spaBaseUrl.substring(0, spaBaseUrl.length() - 1)
+                : spaBaseUrl;
+        response.sendRedirect(baseUrl + "/auth/callback?token=" + token);
     }
 
     private Role resolveRole(Authentication authentication, String email) {

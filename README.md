@@ -210,6 +210,9 @@ se puede cambiar. Las pantallas de pedidos se refrescan cada 4 s para reflejar e
 
 ### Mensajería asíncrona (RabbitMQ)
 
+> Documentación completa (arquitectura, configuración, uso en el código, cómo levantarlo
+> y cómo probarlo): **[README-rabbitmq.md](README-rabbitmq.md)**.
+
 Cada vez que un pedido se crea o cambia de estado, `ms-pedidos360-orders` publica un
 evento JSON en RabbitMQ **después de confirmar la transacción** en la base de datos:
 
@@ -321,4 +324,4 @@ GCP_PROJECT_ID=pedidos360-local       # proyecto (ficticio en el emulador)
 PUBSUB_EMULATOR_HOST=pubsub-emulator:8085   # vacío = Pub/Sub real con credenciales ADC
 ```
 
-> _En funcionamiento: **Login con Microsoft Entra ID (OAuth2 + PKCE)**, **emisión/validación de JWT con roles**, **arquitectura BFF + 3 microservicios con bases de datos independientes**, **despliegue controlado por AWS API Gateway sobre ECS Fargate**._
+> _En funcionamiento: **Mensajería asíncrona con RabbitMQ (exchanges, colas, DLQ, reintentos, ACK manual) y GCP Pub/Sub**, **microservicio administrador de RabbitMQ**, **Login con Microsoft Entra ID (OAuth2 + PKCE)**, **emisión/validación de JWT con roles**, **arquitectura BFF + 3 microservicios con bases de datos independientes**, **despliegue controlado por AWS API Gateway sobre ECS Fargate**._

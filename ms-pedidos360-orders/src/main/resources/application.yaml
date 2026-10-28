@@ -12,9 +12,3 @@ spring:
 
 catalog:
   url: ${CATALOG_URL:http://localhost:8081}
-
-orders:
-  simulation:
-    enabled: ${ORDERS_SIMULATION_ENABLED:true}
-    interval-ms: ${ORDERS_SIMULATION_INTERVAL_MS:6000}
-    cancel-rate: ${ORDERS_SIMULATION_CANCEL_RATE:0.3}

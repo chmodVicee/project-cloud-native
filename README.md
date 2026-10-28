@@ -85,6 +85,9 @@ cd FRONTEND && npm install && npm run dev             # puerto 4200
 
 ## Despliegue en AWS (API Gateway + ECS Fargate)
 
+> **Nota:** por ahora el proyecto se ejecuta solo en local (docker-compose). Esta sección
+> se conserva como referencia y no incluye la mensajería asíncrona.
+
 En AWS, todo el backend corre en **ECS Fargate** (un task con 6 contenedores tras un
 ALB) y el **API Gateway HTTP** es el único punto público de entrada. La SPA se sirve
 por nginx dentro del mismo task, por lo que **SPA y API comparten el mismo origen
@@ -182,10 +185,22 @@ Gateway.
 | `/carrito` | autenticado | Cantidades, total y creación de orden |
 | `/mis-pedidos` | autenticado | Órdenes del usuario con sus items |
 | `/admin/productos` | ADMIN | CRUD de productos y categorías |
-| `/admin/ordenes` | ADMIN | Cambio de estado de cualquier orden |
+| `/admin/ordenes` | ADMIN | Cambio de estado de cualquier orden (único origen de los cambios de estado) |
 | `/admin/usuarios` | ADMIN | Listado de usuarios |
 
 **Flujo OAuth2:** el botón de Microsoft lleva a `/oauth2/authorization/azure` (y el de Google a `/oauth2/authorization/google`). El proveedor redirige a su `AZURE_REDIRECT_URI`/`GOOGLE_REDIRECT_URI`, y `ms-pedidos360-users` completa el login y redirige a `${SPA_BASE_URL}/auth/callback?token=...`, donde la SPA guarda el token y navega al catálogo.
+
+---
+
+### Estados de un pedido
+
+`RECIBIDO → CONFIRMADO → PREPARANDO → LISTO → ENTREGADO` (o `CANCELADO`). Un pedido
+nace en `RECIBIDO` y avanza **solo** cuando un ADMIN cambia su estado desde
+`/admin/ordenes` (`PUT /api/orders/{id}/status`). Desde `ENTREGADO` o `CANCELADO` ya no
+se puede cambiar. Las pantallas de pedidos se refrescan cada 4 s para reflejar el cambio.
+
+> La simulación automática anterior (`OrderStatusSimulator`, cambio cada 6 s y
+> cancelación aleatoria, variables `ORDERS_SIMULATION_*`) fue eliminada.
 
 ---
 

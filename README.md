@@ -222,6 +222,25 @@ evento JSON en RabbitMQ **después de confirmar la transacción** en la base de 
 * El broker confirma cada publicación (*publisher confirms*) y devuelve los mensajes no
   enrutables; ambos casos quedan en los logs.
 
+**Consumidores** (`messaging/consumer/<dominio>`, todos con `@RabbitListener` y ACK manual):
+
+| Consumidor | Cola | Qué hace |
+|------------|------|----------|
+| `notification/OrderNotificationConsumer` | `orders.notifications.queue` (`order.#`) | Notifica al cliente el nuevo estado (registro `[NOTIFICACIÓN]` en el log) |
+| `deadletter/DeadLetterConsumer` | `orders.notifications.dlq` | Registra en el log cada mensaje no entregado (cola de origen, motivo y contenido) |
+
+Manejo de errores (`messaging/support/MessageRetryHandler`):
+
+| Situación | Respuesta | Destino |
+|-----------|-----------|---------|
+| Procesado correctamente | `basicAck` | - |
+| JSON inválido, campos obligatorios faltantes o pedido inexistente (no recuperable) | `basicNack(requeue=false)` | DLX `pedidos360.orders.dlx` → DLQ |
+| Error transitorio (p. ej. base de datos caída) | copia a la cola de espera (TTL 5 s) + `basicAck` | vuelve a la cola principal |
+| Error transitorio tras 3 intentos | `basicNack(requeue=false)` | DLQ |
+
+Nunca se hace `NACK` con *requeue* para no generar bucles de reproceso. Intentos y espera
+se ajustan con `MESSAGING_RETRY_MAX_ATTEMPTS` y `MESSAGING_RETRY_DELAY_MS`.
+
 ---
 
 ## Reglas de autorización (BFF)

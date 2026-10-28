@@ -17,6 +17,13 @@ spring:
     # El broker confirma cada publicacion y devuelve los mensajes no enrutables
     publisher-confirm-type: correlated
     publisher-returns: true
+    listener:
+      simple:
+        # ACK explicito en cada consumidor (basicAck / basicNack)
+        acknowledge-mode: manual
+        prefetch: 10
+        # Un mensaje rechazado nunca vuelve a la cola: va a la DLQ
+        default-requeue-rejected: false
 
 catalog:
   url: ${CATALOG_URL:http://localhost:8081}
@@ -26,6 +33,17 @@ messaging:
   rabbitmq:
     exchanges:
       orders: pedidos360.orders.exchange
+      retry: pedidos360.orders.retry
+      dead-letter: pedidos360.orders.dlx
     routing-keys:
       order-created: order.created
       order-status-changed: order.status.changed
+      all-order-events: "order.#"
+    queues:
+      notifications:
+        name: orders.notifications.queue
+        retry-queue: orders.notifications.retry.queue
+        dead-letter-queue: orders.notifications.dlq
+    retry:
+      max-attempts: ${MESSAGING_RETRY_MAX_ATTEMPTS:3}
+      delay-ms: ${MESSAGING_RETRY_DELAY_MS:5000}

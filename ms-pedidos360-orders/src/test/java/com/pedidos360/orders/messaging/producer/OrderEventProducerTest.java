@@ -1,7 +1,7 @@
 package com.pedidos360.orders.messaging.producer;
 
-import com.pedidos360.orders.config.MessagingProperties;
 import com.pedidos360.orders.event.OrderStatusEvent;
+import com.pedidos360.orders.messaging.TestMessagingProperties;
 import com.pedidos360.orders.model.OrderStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,10 +29,7 @@ class OrderEventProducerTest {
     @BeforeEach
     void setUp() {
         rabbitTemplate = mock(RabbitTemplate.class);
-        MessagingProperties properties = new MessagingProperties(
-                new MessagingProperties.Exchanges("test.exchange"),
-                new MessagingProperties.RoutingKeys("order.created", "order.status.changed"));
-        producer = new OrderEventProducer(rabbitTemplate, properties);
+        producer = new OrderEventProducer(rabbitTemplate, TestMessagingProperties.create());
     }
 
     @Test
@@ -41,7 +38,7 @@ class OrderEventProducerTest {
 
         producer.publish(event);
 
-        verify(rabbitTemplate).convertAndSend(eq("test.exchange"), eq("order.created"), eq(event),
+        verify(rabbitTemplate).convertAndSend(eq("test.orders"), eq("order.created"), eq(event),
                 any(MessagePostProcessor.class), any(CorrelationData.class));
     }
 
@@ -51,7 +48,7 @@ class OrderEventProducerTest {
 
         producer.publish(event);
 
-        verify(rabbitTemplate).convertAndSend(eq("test.exchange"), eq("order.status.changed"), eq(event),
+        verify(rabbitTemplate).convertAndSend(eq("test.orders"), eq("order.status.changed"), eq(event),
                 any(MessagePostProcessor.class), any(CorrelationData.class));
     }
 

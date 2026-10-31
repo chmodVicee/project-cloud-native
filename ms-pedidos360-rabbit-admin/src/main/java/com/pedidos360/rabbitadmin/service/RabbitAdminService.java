@@ -54,6 +54,12 @@ public class RabbitAdminService {
         if (request.isAutoDelete()) {
             builder.autoDelete();
         }
+        // El cluster usa colas quorum por defecto (ver docker/rabbitmq/rabbitmq.conf).
+        // Las quorum exigen ser durables y no admiten auto-delete, asi que las
+        // colas efimeras se declaran explicitamente como classic.
+        if (!request.isDurable() || request.isAutoDelete()) {
+            builder.withArgument("x-queue-type", "classic");
+        }
         if (request.deadLetterExchange() != null) {
             builder.deadLetterExchange(request.deadLetterExchange());
         }

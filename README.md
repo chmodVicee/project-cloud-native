@@ -33,7 +33,7 @@ Microsoft Entra ID (Usuarios + Roles)
 | **ms-pedidos360-catalog**  | 8081         | `catalog_db`| CRUD de categorías y productos, control de stock |
 | **ms-pedidos360-orders**   | 8082         | `orders_db` | Órdenes, estados y descuento de stock contra el catálogo |
 | **ms-pedidos360-rabbit-admin** | 8084     | -           | API REST para crear/eliminar colas, exchanges y bindings de RabbitMQ |
-| **RabbitMQ**               | 5672 / 15672 | -           | Broker de mensajería asíncrona (AMQP + consola web de administración) |
+| **RabbitMQ** (cluster de 3 nodos) | 5672-5674 / 15672-15674 | - | Broker de mensajería asíncrona con colas quorum replicadas (AMQP + consola web por nodo) |
 | **Pub/Sub emulator**       | 8085         | -           | Emulador local de Google Cloud Pub/Sub (sin credenciales de GCP) |
 
 **Tecnologías:** Java 21 · Spring Boot · PostgreSQL · RabbitMQ · Google Cloud Pub/Sub · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
@@ -42,7 +42,7 @@ Microsoft Entra ID (Usuarios + Roles)
 
 ## Ejecución con Docker (recomendada)
 
-Levanta PostgreSQL, RabbitMQ, el emulador de Pub/Sub y los servicios de la aplicación (SPA + microservicios) en un solo comando:
+Levanta PostgreSQL, el **cluster de RabbitMQ (3 nodos)**, el emulador de Pub/Sub y los servicios de la aplicación (SPA + microservicios) en un solo comando:
 
 ```bash
 # 1) Copiar el archivo de variables y completar los valores:
@@ -58,7 +58,7 @@ Una vez arriba:
 * BFF (punto de entrada único de la API): `http://localhost:8080`
 * Login con Microsoft (OAuth2): `http://localhost:8080/oauth2/authorization/azure`
 * Catálogo (vía BFF): `http://localhost:8080/api/catalog/products`
-* Consola de RabbitMQ: `http://localhost:15672` (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`)
+* Consolas de RabbitMQ (una por nodo): `http://localhost:15672`, `http://localhost:15673` y `http://localhost:15674` (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`). Cualquiera muestra el cluster completo.
 * Los puertos 8081, 8082, 8083 y 8084 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
 
 > Las variables requeridas en `.env`: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `JWT_SECRET`. `SPA_BASE_URL` define hacia dónde redirige el backend tras el login OAuth2 (por defecto `http://localhost:4200`).
@@ -74,7 +74,7 @@ docker-compose down
 
 ## Ejecución local (sin Docker)
 
-Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`); `orders` y `rabbit-admin` necesitan además RabbitMQ (`docker-compose up -d rabbitmq pubsub-emulator`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
+Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`); `orders` y `rabbit-admin` necesitan además el cluster de RabbitMQ (`docker-compose up -d rabbitmq-1 rabbitmq-2 rabbitmq-3 pubsub-emulator`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
 
 ```bash
 cd ms-pedidos360-users && ./mvnw spring-boot:run      # puerto 8083
@@ -227,6 +227,10 @@ evento JSON en RabbitMQ **después de confirmar la transacción** en la base de 
   productor `messaging/producer/OrderEventProducer` lo envía al broker.
 * El broker confirma cada publicación (*publisher confirms*) y devuelve los mensajes no
   enrutables; ambos casos quedan en los logs.
+* RabbitMQ corre como **cluster de 3 nodos con colas quorum**: cada cola se replica en la
+  mayoría del cluster y el sistema sigue publicando/consumiendo si se cae un nodo. Los
+  clientes reciben los 3 nodos en `spring.rabbitmq.addresses` y reconectan solos. Detalle
+  y prueba de *failover* en [README-rabbitmq.md](README-rabbitmq.md#7-cluster-de-rabbitmq-alta-disponibilidad).
 
 **Consumidores** (`messaging/consumer/<dominio>`, todos con `@RabbitListener` y ACK manual):
 

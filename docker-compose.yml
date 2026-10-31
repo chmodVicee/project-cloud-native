@@ -1,3 +1,10 @@
+# ---------------------------------------------------------------------------
+# Cluster RabbitMQ: 3 nodos con colas quorum.
+# Con 3 nodos el cluster mantiene la mayoria (2 de 3) y sigue operando si se
+# cae uno. Con 2 nodos no hay mayoria posible: la cola quorum dejaria de
+# aceptar escrituras al caer uno de ellos.
+# La configuracion comun de los nodos esta en docker/rabbitmq/rabbitmq.conf.
+# ---------------------------------------------------------------------------
 services:
   db:
     image: postgres:16-alpine
@@ -15,23 +22,84 @@ services:
       timeout: 5s
       retries: 10
 
-  # Broker de mensajeria asincrona (AMQP 5672 + consola web 15672)
-  rabbitmq:
+  # Cluster de mensajeria asincrona: AMQP 5672-5674 + consolas 15672-15674.
+  # El nodo 1 arranca primero y crea el cluster; los otros dos se unen a el.
+  rabbitmq-1:
     image: rabbitmq:4.1-management
-    container_name: pedidos360-rabbitmq
+    container_name: pedidos360-rabbitmq-1
+    hostname: rabbitmq-1
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-pedidos360}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-pedidos360}
+      # La cookie Erlang debe ser identica en todos los nodos o no se
+      # autentican entre si al formar el cluster.
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-pedidos360-cluster-cookie}
+      RABBITMQ_NODENAME: rabbit@rabbitmq-1
     volumes:
-      - rabbitmqdata:/var/lib/rabbitmq
+      - rabbitmqdata-1:/var/lib/rabbitmq
+      - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/90-cluster.conf:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 12
+      start_period: 20s
     ports:
       - "5672:5672"
       - "15672:15672"
+
+  rabbitmq-2:
+    image: rabbitmq:4.1-management
+    container_name: pedidos360-rabbitmq-2
+    hostname: rabbitmq-2
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-pedidos360}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-pedidos360}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-pedidos360-cluster-cookie}
+      RABBITMQ_NODENAME: rabbit@rabbitmq-2
+    volumes:
+      - rabbitmqdata-2:/var/lib/rabbitmq
+      - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/90-cluster.conf:ro
+    healthcheck:
+      # Solo se considera sano cuando ya se unio al cluster (ve al menos 2 nodos).
+      # Asi orders/rabbit-admin no declaran colas quorum antes de que exista mayoria.
+      test: ["CMD-SHELL", "test $$(rabbitmqctl -q eval 'length(rabbit_nodes:list_running()).') -ge 2"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+
+  rabbitmq-3:
+    image: rabbitmq:4.1-management
+    container_name: pedidos360-rabbitmq-3
+    hostname: rabbitmq-3
+    depends_on:
+      rabbitmq-1:
+        condition: service_healthy
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-pedidos360}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-pedidos360}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-pedidos360-cluster-cookie}
+      RABBITMQ_NODENAME: rabbit@rabbitmq-3
+    volumes:
+      - rabbitmqdata-3:/var/lib/rabbitmq
+      - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/90-cluster.conf:ro
+    healthcheck:
+      # Solo se considera sano cuando ya se unio al cluster (ve al menos 2 nodos).
+      test: ["CMD-SHELL", "test $$(rabbitmqctl -q eval 'length(rabbit_nodes:list_running()).') -ge 2"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    ports:
+      - "5674:5672"
+      - "15674:15672"
 
   # Emulador local de Google Cloud Pub/Sub (no requiere credenciales de GCP)
   pubsub-emulator:
@@ -93,7 +161,11 @@ services:
         condition: service_healthy
       ms-pedidos360-catalog:
         condition: service_started
-      rabbitmq:
+      rabbitmq-1:
+        condition: service_healthy
+      rabbitmq-2:
+        condition: service_healthy
+      rabbitmq-3:
         condition: service_healthy
       pubsub-emulator:
         condition: service_started
@@ -104,8 +176,9 @@ services:
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
       CATALOG_URL: http://ms-pedidos360-catalog:8081
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
+      # Los clientes reciben los 3 nodos: si uno cae, Spring AMQP reconecta
+      # contra los siguientes sin reiniciar el microservicio.
+      RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672,rabbitmq-3:5672
       RABBITMQ_USER: ${RABBITMQ_USER:-pedidos360}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-pedidos360}
       GCP_PUBSUB_ENABLED: ${GCP_PUBSUB_ENABLED:-true}
@@ -120,11 +193,14 @@ services:
       context: ./ms-pedidos360-rabbit-admin
     container_name: ms-pedidos360-rabbit-admin
     depends_on:
-      rabbitmq:
+      rabbitmq-1:
+        condition: service_healthy
+      rabbitmq-2:
+        condition: service_healthy
+      rabbitmq-3:
         condition: service_healthy
     environment:
-      RABBITMQ_HOST: rabbitmq
-      RABBITMQ_PORT: 5672
+      RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672,rabbitmq-3:5672
       RABBITMQ_USER: ${RABBITMQ_USER:-pedidos360}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-pedidos360}
     ports:
@@ -166,4 +242,6 @@ services:
 
 volumes:
   pgdata:
-  rabbitmqdata:
+  rabbitmqdata-1:
+  rabbitmqdata-2:
+  rabbitmqdata-3:

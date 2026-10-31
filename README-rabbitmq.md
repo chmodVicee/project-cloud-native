@@ -12,6 +12,7 @@ la aplicación, cómo levantarla y cómo probarla. La visión general del sistem
 4. [Cómo se usa RabbitMQ en la aplicación](#4-cómo-se-usa-rabbitmq-en-la-aplicación)
 5. [Cómo levantarlo](#5-cómo-levantarlo)
 6. [Cómo probarlo](#6-cómo-probarlo)
+7. [Cluster de RabbitMQ (alta disponibilidad)](#7-cluster-de-rabbitmq-alta-disponibilidad)
 
 ---
 
@@ -24,7 +25,7 @@ consumidores independientes:
 
 | Pieza | Rol |
 |-------|-----|
-| **RabbitMQ** | Mensajería **interna** entre componentes: exchanges, colas, bindings, reintentos y DLQ (cola de mensajes muertos). Es lo que usan los productores y consumidores de los microservicios. |
+| **RabbitMQ** | Mensajería **interna** entre componentes: exchanges, colas, bindings, reintentos y DLQ (cola de mensajes muertos). Corre como **cluster de 3 nodos con colas quorum** replicadas, así que sigue operando si se cae un nodo. |
 | **GCP Pub/Sub** | Cola de mensajes **en la nube**: cada estado se reenvía al topic `pedidos360-order-status` para que otros sistemas en GCP (analítica, notificaciones externas, auditoría) lo consuman. En local se usa el emulador oficial, sin credenciales. |
 | **ms-pedidos360-rabbit-admin** | Microservicio que expone una API REST para crear y eliminar colas, exchanges y bindings. |
 
@@ -149,9 +150,10 @@ contenedores; en ejecución local cada microservicio las lee de su propio `.env`
 
 | Variable | Usada por | Valor por defecto | Descripción |
 |----------|-----------|-------------------|-------------|
-| `RABBITMQ_USER` | rabbitmq, orders, rabbit-admin | `pedidos360` | Usuario del broker |
-| `RABBITMQ_PASSWORD` | rabbitmq, orders, rabbit-admin | `pedidos360` en compose | Clave del broker (en `.env.example` es un valor de ejemplo, cámbiala) |
-| `RABBITMQ_HOST` / `RABBITMQ_PORT` | orders, rabbit-admin | `localhost` / `5672` | En compose: `rabbitmq` / `5672` |
+| `RABBITMQ_USER` | rabbitmq-1/2/3, orders, rabbit-admin | `pedidos360` | Usuario del broker |
+| `RABBITMQ_PASSWORD` | rabbitmq-1/2/3, orders, rabbit-admin | `pedidos360` en compose | Clave del broker (en `.env.example` es un valor de ejemplo, cámbiala) |
+| `RABBITMQ_ERLANG_COOKIE` | rabbitmq-1/2/3 | `pedidos360-cluster-cookie` en compose | Cookie Erlang compartida; sin ella los nodos no forman cluster |
+| `RABBITMQ_ADDRESSES` | orders, rabbit-admin | `localhost:5672` | Nodos del cluster separados por coma. En compose: `rabbitmq-1:5672,rabbitmq-2:5672,rabbitmq-3:5672` |
 | `MESSAGING_RETRY_MAX_ATTEMPTS` | orders | `3` | Intentos totales antes de la DLQ |
 | `MESSAGING_RETRY_DELAY_MS` | orders | `5000` | Espera entre reintentos (TTL de la cola de espera) |
 | `GCP_PUBSUB_ENABLED` | orders | `false` (compose: `true`) | Activa el reenvío a Pub/Sub y el subscriber |
@@ -168,8 +170,9 @@ contenedores; en ejecución local cada microservicio las lee de su propio `.env`
 ```yaml
 spring:
   rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
+    # Cluster de 3 nodos: Spring AMQP se conecta al primero disponible y
+    # reintenta con los siguientes si un nodo cae (failover automático).
+    addresses: ${RABBITMQ_ADDRESSES:localhost:5672}
     username: ${RABBITMQ_USER:pedidos360}
     password: ${RABBITMQ_PASSWORD}
     publisher-confirm-type: correlated   # el broker confirma cada publicación
@@ -180,6 +183,10 @@ spring:
         prefetch: 10                     # máximo de mensajes sin confirmar por consumidor
         default-requeue-rejected: false  # un rechazo nunca vuelve a la cola: va a la DLQ
 ```
+
+En Docker `RABBITMQ_ADDRESSES` vale
+`rabbitmq-1:5672,rabbitmq-2:5672,rabbitmq-3:5672`; fuera de Docker, los puertos publicados
+`localhost:5672,localhost:5673,localhost:5674` (ver `.env-example` de cada módulo).
 
 ### 3.3 Nombres centralizados (`messaging.rabbitmq.*`)
 
@@ -385,12 +392,19 @@ docker-compose up --build
 
 | Servicio | URL |
 |----------|-----|
-| Consola de RabbitMQ | http://localhost:15672 (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`) |
-| AMQP | `localhost:5672` |
+| Consola de RabbitMQ (una por nodo) | http://localhost:15672 · http://localhost:15673 · http://localhost:15674 (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`) |
+| AMQP (uno por nodo) | `localhost:5672` · `localhost:5673` · `localhost:5674` |
 | Emulador de Pub/Sub | `localhost:8085` |
 | Administrador (depuración, sin JWT) | http://localhost:8084/api/rabbit/... |
 | Orders (depuración, sin JWT) | http://localhost:8082/api/orders |
 | BFF (con JWT) | http://localhost:8080 |
+
+Cualquiera de las tres consolas muestra el cluster completo (pestaña *Nodes*). Para
+verificarlo desde la terminal:
+
+```bash
+docker compose exec rabbitmq-1 rabbitmqctl cluster_status
+```
 
 Para ver solo los logs de mensajería:
 
@@ -401,7 +415,7 @@ docker logs -f ms-pedidos360-orders | grep -E "Evento publicado|NOTIFICACIÓN|PU
 ### Solo la infraestructura (para ejecutar los servicios con Maven)
 
 ```bash
-docker-compose up -d rabbitmq pubsub-emulator
+docker-compose up -d rabbitmq-1 rabbitmq-2 rabbitmq-3 pubsub-emulator
 cd ms-pedidos360-orders && cp .env-example .env && ./mvnw spring-boot:run
 cd ms-pedidos360-rabbit-admin && cp .env-example .env && ./mvnw spring-boot:run
 ```
@@ -511,5 +525,68 @@ Por el BFF: sin token `401`, con rol USER `403` y con rol ADMIN `2xx`/`4xx` seg�
 
 ```bash
 cd ms-pedidos360-orders && ./mvnw test        # productor, consumidores y manejo de reintentos/DLQ (14 tests)
-cd ms-pedidos360-rabbit-admin && ./mvnw test  # servicio administrador y validación de la API (16 tests)
+cd ms-pedidos360-rabbit-admin && ./mvnw test  # servicio administrador y validación de la API (17 tests)
 ```
+
+---
+
+## 7. Cluster de RabbitMQ (alta disponibilidad)
+
+El `docker-compose.yml` levanta **tres nodos** (`rabbitmq-1`, `rabbitmq-2`, `rabbitmq-3`)
+que forman un cluster. Las colas son **quorum**: cada una se replica en la mayoría del
+cluster, de modo que si un nodo se cae los mensajes siguen disponibles y los
+microservicios reconectan contra otro nodo sin reiniciarse.
+
+### 7.1 Por qué 3 nodos y no 2
+
+Las colas quorum necesitan **mayoría** para aceptar escrituras (un *quorum*). Con 2 nodos,
+al caer uno queda 1 de 2: no hay mayoría y la cola deja de aceptar publicaciones. Con 3
+nodos, al caer uno quedan 2 de 3 y el cluster sigue operando. RabbitMQ 4.x ya no tiene
+colas *classic mirrored*, por lo que las quorum son la única opción replicada.
+
+### 7.2 Cómo se forma el cluster
+
+La configuración común está en `docker/rabbitmq/rabbitmq.conf`, montada en los tres nodos:
+
+| Ajuste | Valor | Para qué |
+|--------|-------|----------|
+| `cluster_formation.peer_discovery_backend` | `classic_config` | Cada nodo conoce la lista de pares |
+| `cluster_formation.classic_config.nodes.1..3` | `rabbit@rabbitmq-1..3` | Nombres de los tres nodos |
+| `default_queue_type` | `quorum` | Toda cola nueva se declara replicada |
+| `cluster_partition_handling` | `pause_minority` | La minoría se pausa ante una partición de red |
+
+Además, los tres contenedores comparten `RABBITMQ_ERLANG_COOKIE` (obligatorio para que se
+autentiquen entre sí) y tienen `hostname` fijo, porque el nombre de nodo es
+`rabbit@<hostname>`.
+
+En el código, `RabbitMQConfig` declara las colas de `orders` con `.quorum()` (principal,
+reintentos y DLQ), y `ms-pedidos360-rabbit-admin` crea las colas por API con el tipo quorum
+por defecto (si se pide una cola no durable o *auto-delete*, la declara `classic` porque
+las quorum no lo permiten).
+
+### 7.3 Prueba de failover
+
+```bash
+# 1. Ver el cluster (deben aparecer los 3 nodos "running")
+docker compose exec rabbitmq-1 rabbitmqctl cluster_status
+
+# 2. Ver el tipo y los miembros de las colas
+docker compose exec rabbitmq-1 rabbitmqctl list_queues name type members
+
+# 3. Simular la caída del nodo al que están conectados los microservicios
+docker compose stop rabbitmq-1
+
+# 4. El cluster sigue con mayoría (2 de 3) y orders reconecta solo a otro nodo
+docker logs --since 1m ms-pedidos360-orders | grep -E "Attempting to connect|Created new connection"
+# crear un pedido o cambiar su estado desde la SPA y revisar los logs
+docker logs -f ms-pedidos360-orders | grep -E "Evento publicado|NOTIFICACIÓN"
+
+# 5. Volver a levantar el nodo caído y comprobar que se reincorpora
+docker compose start rabbitmq-1
+docker compose exec -T rabbitmq-2 rabbitmqctl cluster_status
+```
+
+Con un solo nodo caído la aplicación no se detiene: los clientes pasan al siguiente nodo
+de `spring.rabbitmq.addresses` y la cola quorum conserva la mayoría. Si se caen **dos**
+nodos, el cluster pierde la mayoría y las colas quorum quedan de solo lectura hasta que
+vuelva un tercer nodo (es el compromiso de consistencia de quorum).

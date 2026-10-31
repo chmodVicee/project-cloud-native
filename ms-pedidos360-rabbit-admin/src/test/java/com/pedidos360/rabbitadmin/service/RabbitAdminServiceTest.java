@@ -65,6 +65,21 @@ class RabbitAdminServiceTest {
     }
 
     @Test
+    void colaEfimeraSeDeclaraClassicPorqueLasQuorumSonDurables() {
+        when(amqpAdmin.getQueueInfo("tickets.efimera"))
+                .thenReturn(null)
+                .thenReturn(new QueueInformation("tickets.efimera", 0, 0));
+
+        service.createQueue(new CreateQueueRequest("tickets.efimera", false, true,
+                null, null, null, null));
+
+        ArgumentCaptor<Queue> captor = ArgumentCaptor.forClass(Queue.class);
+        verify(amqpAdmin).declareQueue(captor.capture());
+        assertThat(captor.getValue().getArguments())
+                .containsEntry("x-queue-type", "classic");
+    }
+
+    @Test
     void noCreaUnaColaQueYaExiste() {
         when(amqpAdmin.getQueueInfo("tickets.queue")).thenReturn(new QueueInformation("tickets.queue", 0, 0));
 

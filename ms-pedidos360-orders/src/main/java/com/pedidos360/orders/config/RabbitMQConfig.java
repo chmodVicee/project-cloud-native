@@ -82,7 +82,7 @@ public class RabbitMQConfig {
 
     @Bean
     public Queue notificationsDeadLetterQueue(MessagingProperties properties) {
-        return QueueBuilder.durable(properties.queues().notifications().deadLetterQueue()).build();
+        return QueueBuilder.durable(properties.queues().notifications().deadLetterQueue()).quorum().build();
     }
 
     /** Todos los eventos de pedidos (order.#) llegan a la cola de notificaciones. */
@@ -121,7 +121,7 @@ public class RabbitMQConfig {
 
     @Bean
     public Queue cloudBridgeDeadLetterQueue(MessagingProperties properties) {
-        return QueueBuilder.durable(properties.queues().cloudBridge().deadLetterQueue()).build();
+        return QueueBuilder.durable(properties.queues().cloudBridge().deadLetterQueue()).quorum().build();
     }
 
     /** Todos los eventos de pedidos (order.#) se reenvían también a la nube. */
@@ -192,9 +192,10 @@ public class RabbitMQConfig {
 
     // ---------- Plantillas de colas ----------
 
-    /** Cola principal durable cuyos mensajes rechazados van al DLX con destino a su DLQ. */
+    /** Cola principal durable y replicada (quorum) cuyos mensajes rechazados van al DLX. */
     private static Queue mainQueue(MessagingProperties properties, MessagingProperties.QueueRoute route) {
         return QueueBuilder.durable(route.name())
+                .quorum()
                 .deadLetterExchange(properties.exchanges().deadLetter())
                 .deadLetterRoutingKey(route.deadLetterQueue())
                 .build();
@@ -203,9 +204,11 @@ public class RabbitMQConfig {
     /**
      * Cola de espera sin consumidores: el mensaje expira tras {@code retry.delay-ms} y el
      * exchange por defecto ("") lo devuelve a la cola principal (routing key = su nombre).
+     * Tambien es quorum para que sobreviva a la caida de un nodo.
      */
     private static Queue retryQueue(MessagingProperties properties, MessagingProperties.QueueRoute route) {
         return QueueBuilder.durable(route.retryQueue())
+                .quorum()
                 .ttl((int) properties.retry().delayMs())
                 .deadLetterExchange("")
                 .deadLetterRoutingKey(route.name())

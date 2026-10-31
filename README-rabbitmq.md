@@ -573,16 +573,17 @@ docker compose exec rabbitmq-1 rabbitmqctl cluster_status
 # 2. Ver el tipo y los miembros de las colas
 docker compose exec rabbitmq-1 rabbitmqctl list_queues name type members
 
-# 3. Simular la caída de un nodo
-docker compose stop rabbitmq-2
+# 3. Simular la caída del nodo al que están conectados los microservicios
+docker compose stop rabbitmq-1
 
-# 4. El cluster sigue con mayoría (2 de 3): crear un pedido o cambiar su estado
-#    desde la SPA y revisar los logs de orders
+# 4. El cluster sigue con mayoría (2 de 3) y orders reconecta solo a otro nodo
+docker logs --since 1m ms-pedidos360-orders | grep -E "Attempting to connect|Created new connection"
+# crear un pedido o cambiar su estado desde la SPA y revisar los logs
 docker logs -f ms-pedidos360-orders | grep -E "Evento publicado|NOTIFICACIÓN"
 
-# 5. Volver a levantar el nodo caído
-docker compose start rabbitmq-2
-docker compose exec rabbitmq-1 rabbitmqctl cluster_status
+# 5. Volver a levantar el nodo caído y comprobar que se reincorpora
+docker compose start rabbitmq-1
+docker compose exec -T rabbitmq-2 rabbitmqctl cluster_status
 ```
 
 Con un solo nodo caído la aplicación no se detiene: los clientes pasan al siguiente nodo

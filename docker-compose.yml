@@ -64,9 +64,11 @@ services:
       - rabbitmqdata-2:/var/lib/rabbitmq
       - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/90-cluster.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Solo se considera sano cuando ya se unio al cluster (ve al menos 2 nodos).
+      # Asi orders/rabbit-admin no declaran colas quorum antes de que exista mayoria.
+      test: ["CMD-SHELL", "test $$(rabbitmqctl -q eval 'length(rabbit_nodes:list_running()).') -ge 2"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 12
       start_period: 20s
     ports:
@@ -89,9 +91,10 @@ services:
       - rabbitmqdata-3:/var/lib/rabbitmq
       - ./docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/conf.d/90-cluster.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Solo se considera sano cuando ya se unio al cluster (ve al menos 2 nodos).
+      test: ["CMD-SHELL", "test $$(rabbitmqctl -q eval 'length(rabbit_nodes:list_running()).') -ge 2"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 12
       start_period: 20s
     ports:
@@ -160,6 +163,10 @@ services:
         condition: service_started
       rabbitmq-1:
         condition: service_healthy
+      rabbitmq-2:
+        condition: service_healthy
+      rabbitmq-3:
+        condition: service_healthy
       pubsub-emulator:
         condition: service_started
     environment:
@@ -187,6 +194,10 @@ services:
     container_name: ms-pedidos360-rabbit-admin
     depends_on:
       rabbitmq-1:
+        condition: service_healthy
+      rabbitmq-2:
+        condition: service_healthy
+      rabbitmq-3:
         condition: service_healthy
     environment:
       RABBITMQ_ADDRESSES: rabbitmq-1:5672,rabbitmq-2:5672,rabbitmq-3:5672

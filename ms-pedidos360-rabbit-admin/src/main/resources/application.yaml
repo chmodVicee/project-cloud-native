@@ -3,8 +3,9 @@ server:
 
 spring:
   rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
+    # Nodos del cluster separados por coma: Spring AMQP usa el primero
+    # disponible y pasa al siguiente si un nodo cae.
+    addresses: ${RABBITMQ_ADDRESSES:localhost:5672}
     username: ${RABBITMQ_USER:pedidos360}
     password: ${RABBITMQ_PASSWORD}
 

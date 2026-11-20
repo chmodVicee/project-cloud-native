@@ -193,6 +193,19 @@ docker compose exec kafka kafka-console-consumer.sh \
   --from-beginning --property print.key=true --property print.partition=true
 ```
 
+**4. Offsets por partición y lag del grupo de consumidores:**
+
+```bash
+docker compose exec kafka kafka-get-offsets \
+  --bootstrap-server localhost:29092 --topic tutorial-particiones
+
+docker compose exec kafka kafka-consumer-groups --bootstrap-server localhost:29092 \
+  --describe --group mi-grupo-educativo
+```
+
+> `kafka.tools.GetOffsetShell` (usado en el README del repo original) no está disponible
+> en las imágenes `confluentinc/cp-kafka:7.5.0`; usa `kafka-get-offsets` como arriba.
+
 ---
 
 ## Problemas comunes
@@ -204,6 +217,7 @@ docker compose exec kafka kafka-console-consumer.sh \
 | `Unknown topic` o no llegan mensajes | El topic se crea solo; créalo con 3 particiones con el comando de arriba. |
 | `TimeoutException` al publicar | Revisa los `advertised.listeners`: dentro de Docker el cliente debe usar `kafka:29092`, no `localhost:9092`. |
 | No se ve el reparto por particiones | Usa varias keys (`KEY_POOL>1`) y crea el topic con 3 particiones antes de enviar. |
+| No aparecen logs internos de Spring Kafka | `logging.level.org.springframework.kafka` está en `WARN`; cámbialo a `DEBUG` solo si necesitas depurar el framework. El `MENSAJE RECIBIDO` del consumidor siempre se registra en INFO. |
 | Conflicto de puerto 8080 | La UI está en 8086; 8080 pertenece al BFF. |
 
 ---

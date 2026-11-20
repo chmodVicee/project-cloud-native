@@ -1,0 +1,29 @@
+server:
+  port: ${PORT:8888}
+
+spring:
+  application:
+    name: ms-pedidos360-kafka
+  kafka:
+    # Desde el host se usa localhost:9092; dentro de docker compose el
+    # servicio se declara con KAFKA_BOOTSTRAP_SERVERS=kafka:29092.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: ${KAFKA_GROUP_ID:mi-grupo-educativo}
+      auto-offset-reset: earliest
+      enable-auto-commit: true
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+# Nombres centralizados del ejemplo (prefijo kafka), igual que messaging.* en orders.
+kafka:
+  topic: ${KAFKA_TOPIC:tutorial-particiones}
+  group-id: ${KAFKA_GROUP_ID:mi-grupo-educativo}
+
+logging:
+  level:
+    root: INFO
+    org.springframework.kafka: WARN

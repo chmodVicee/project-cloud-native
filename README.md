@@ -33,10 +33,12 @@ Microsoft Entra ID (Usuarios + Roles)
 | **ms-pedidos360-catalog**  | 8081         | `catalog_db`| CRUD de categorías y productos, control de stock |
 | **ms-pedidos360-orders**   | 8082         | `orders_db` | Órdenes, estados y descuento de stock contra el catálogo |
 | **ms-pedidos360-rabbit-admin** | 8084     | -           | API REST para crear/eliminar colas, exchanges y bindings de RabbitMQ |
+| **ms-pedidos360-kafka**    | 8888         | -           | Actividad 3.2.1: productor REST y consumidor Kafka con scripts de carga ([guía](README-kafka.md)) |
 | **RabbitMQ** (cluster de 3 nodos) | 5672-5674 / 15672-15674 | - | Broker de mensajería asíncrona con colas quorum replicadas (AMQP + consola web por nodo) |
 | **Pub/Sub emulator**       | 8085         | -           | Emulador local de Google Cloud Pub/Sub (sin credenciales de GCP) |
+| **Kafka + ZooKeeper**      | 9092 / 2181  | -           | Broker de la actividad Kafka 3.2.1 (UI en `http://localhost:8086`) |
 
-**Tecnologías:** Java 21 · Spring Boot · PostgreSQL · RabbitMQ · Google Cloud Pub/Sub · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
+**Tecnologías:** Java 21 · Spring Boot · PostgreSQL · RabbitMQ · Kafka · Google Cloud Pub/Sub · JWT · React + Vite · Maven · Docker / Docker Compose · AWS (API Gateway, ALB, ECR, ECS Fargate, CloudFormation)
 
 ---
 
@@ -60,6 +62,7 @@ Una vez arriba:
 * Catálogo (vía BFF): `http://localhost:8080/api/catalog/products`
 * Consolas de RabbitMQ (una por nodo): `http://localhost:15672`, `http://localhost:15673` y `http://localhost:15674` (usuario/clave = `RABBITMQ_USER` / `RABBITMQ_PASSWORD`). Cualquiera muestra el cluster completo.
 * Los puertos 8081, 8082, 8083 y 8084 se exponen únicamente para depuración; la aplicación debe consumir siempre el 8080.
+* Actividad Kafka 3.2.1: endpoint `http://localhost:8888/api/kafka/send` y Kafka UI `http://localhost:8086` (ver [README-kafka.md](README-kafka.md)).
 
 > Las variables requeridas en `.env`: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `JWT_SECRET`. `SPA_BASE_URL` define hacia dónde redirige el backend tras el login OAuth2 (por defecto `http://localhost:4200`).
 
@@ -74,13 +77,14 @@ docker-compose down
 
 ## Ejecución local (sin Docker)
 
-Cada microservicio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`); `orders` y `rabbit-admin` necesitan además el cluster de RabbitMQ (`docker-compose up -d rabbitmq-1 rabbitmq-2 rabbitmq-3 pubsub-emulator`). Requiere un archivo `.env` en cada carpeta usando su `.env-example`:
+Cada microservicio de negocio necesita PostgreSQL con su base de datos (`users_db`, `catalog_db`, `orders_db`); `orders` y `rabbit-admin` necesitan además el cluster de RabbitMQ (`docker-compose up -d rabbitmq-1 rabbitmq-2 rabbitmq-3 pubsub-emulator`). `ms-pedidos360-kafka` solo necesita Kafka (`docker-compose up -d zookeeper kafka`). Requiere un archivo `.env` en cada carpeta usando su `.env-example` (ver [README-kafka.md](README-kafka.md) para el ejemplo Kafka):
 
 ```bash
 cd ms-pedidos360-users && ./mvnw spring-boot:run      # puerto 8083
 cd ms-pedidos360-catalog && ./mvnw spring-boot:run    # puerto 8081
 cd ms-pedidos360-orders && ./mvnw spring-boot:run     # puerto 8082
 cd ms-pedidos360-rabbit-admin && ./mvnw spring-boot:run  # puerto 8084
+cd ms-pedidos360-kafka && ./mvnw spring-boot:run     # puerto 8888 (requiere Kafka)
 cd ms-pedidos360-bff && ./mvnw spring-boot:run        # puerto 8080
 cd FRONTEND && npm install && npm run dev             # puerto 4200
 ```
